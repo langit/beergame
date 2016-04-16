@@ -1,4 +1,4 @@
-'''This module is for text based Beer Game.
+'''This module is for a text based Beer Game.
 It is developed for teaching purpose only.
 
 By Yingjie Lan (ylan@pku.edu.cn), Peking University
@@ -182,10 +182,23 @@ class BGPlayer:
         self.wait = sum(ordout)
         if shipin is not ordout:
             self.wait += sum(shipin)
-        self.cost = 0.0
+        self.cost = 0
         self.week = 0
         self.thread = None
         self.passcode = None
+
+        #history and performance
+        self.order_history = [] #placed orders
+        self.inventory_history = []
+        self.demand_history = []
+        self.fulfill_history = []
+
+        self.fulfilled_orders = 0 #orders directly fulfilled
+        self.unfulfilled_orders = 0
+        self.fulfilled_boxes = 0
+        self.unfulfilled_boxes = 0
+        self.backlogs = 0 #orders backloged
+        self.onhands = 0
     
     def act(self, ask_order):
         wait, inv = self.wait, self.inv
@@ -213,26 +226,24 @@ Event log of last week (week {}) in order of time:
 increased from {} to {} boxes, waiting for {} more boxes. 
 '''.format(self.week, shipin, old_inv, inv, wait))
 
+        #cost: demand came near the end of a week.
+        cost = (inv * self.game.holding_cost if inv>0
+                      else - inv * self.game.backlog_cost)
+
+
         while True:
             demand = self.game.get_order(self.pid, False)
             if demand is None: yield '''
 Still WAITING for the order to arrive...
 Your patience is much appreciated.'''
             else: break
+
+        fulfilled_boxes = min(max(0, inv), demand)
             
-        if inv>0:
-            fulfil += min(inv, demand)
+        fulfil += fulfilled_boxes
             
         old_inv = inv
         inv -= demand
-
-        #rough estimation of cost
-        cost = (old_inv * self.game.holding_cost if old_inv>0
-                      else - old_inv * self.game.backlog_cost)/2.
-
-        cost += (inv * self.game.holding_cost if inv>0
-                      else - inv * self.game.backlog_cost)/2.
-        
         
         #inv_pos = inv + wait
         yield (
@@ -259,11 +270,52 @@ The incurred cost is {} last week, total cost: {}.
         self.wait, self.inv = wait, inv
         self.cost += cost
         self.week += 1 #increament
+        
+        self.order_history.append(order)
+        self.demand_history.append(demand)
+        self.fulfill_history.append(fulfil)
+        self.inventory_history.append(old_inv)
+        
+        if old_inv <0: self.backlogs -= old_inv
+        else: self.onhands += old_inv
+
+
+        self.fulfilled_boxes += fulfilled_boxes
+        self.unfulfilled_boxes += demand - fulfilled_boxes
+
+        if demand == fulfilled_boxes:
+            self.fulfilled_orders += 1 #orders directly fulfilled
+        else:
+            self.unfulfilled_orders += 1
+        
+        
 
     def __repr__(self):
         return "BG-{}P{}: The {} in game BG-{}".format(
             self.game.game_id, self.pid+1,
             BeerGame.roles[self.pid], self.game.game_id)
+    
+    def save(self):
+        filename = "BG-{}P{}.csv".format(self.game.game_id, self.pid+1)
+        f=open(filename, 'wt')
+        f.write("Game Report for {}\n".format(repr(self)))
+        f.write('Total cost, {}\n'.format(self.cost))
+        f.write('Fulfilled boxes, {}, Unfulfilled boxes, {}\n'.format(
+            self.fulfilled_boxes, self.unfulfilled_boxes))
+        f.write('Fulfilled orders, {}, Unfulfilled orders, {}\n'.format(
+            self.fulfilled_orders, self.unfulfilled_orders))
+        
+        f.write('Total backlogs, {}, Total on-hands, {}\n'.format(
+            self.backlogs, self.onhands))
+        f.write('Week, Placed Order, Demand, Fulfill, Inventory\n')
+
+        for w, (p, d, u, i) in enumerate(
+            zip(self.order_history, self.demand_history,
+                self.fulfill_history, self.inventory_history)):
+            f.write('{},{},{},{},{}\n'.format(w+1,p,d,u,i))
+        f.close()
+        print("File saved:", filename)
+
 
 enco = 'utf-8' #'ascii'
 
@@ -313,11 +365,12 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
         return int(data)
 
     def assign(self, code): #with glock.
-        if code.startswith('any:'): #any slot
+        if code.startswith(':'): #any slot
+            code = code[1:]
             for g in self.games:
                 for p in g.slots:
                     if p.passcode is None:
-                        p.passcode = code[4:]
+                        p.passcode = code
                         self.player = p
                         p.thread = self.thread
                         break
@@ -326,7 +379,7 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
                 g = BeerGame(self.games)
                 for p in g.slots:
                     if p.passcode is None:
-                        p.passcode = code[4:]
+                        p.passcode = code
                         self.player = p
                         p.thread = self.thread
                         break
@@ -353,15 +406,14 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
         ++++++++++++++++++++++++++++++
 
 If you don't know your player ID (something like BG-1P2),
-just use 'any' as your ID, followed by a passcode known
-only to your team. this will assign you to any available
+just skip your ID, start with ':', followed by  a passcode
+known only to your team. You will be assigned an available
 role in a game, and the passcode will be needed next time
-you sign in. An example for this case is "any:pAss123!".
-
+you sign in. An example for this is
+                    :pAss123!
 If you know your player ID and passcode, provide them now.
-
 Your ID:PASSCODE pair: """)
-        #code = 'BG-1P2:passcode' or 'any'
+        #code = 'BG-1P2:passcode' or ':passcode'
         code = str(self.request.recv(128), enco)
         with self.glock: self.assign(code)
         if self.player is None:
@@ -385,6 +437,9 @@ You are waiting for {} boxes of ordered beer from the supplier.
                 self.sendall(msg)
                 if self.player.thread is not self.thread:
                     return #lost the player
+            #self.player.save() #for testing only
+
+        self.player.save()
 
 class ThreadedTCPServer(socketserver.TCPServer):
     
