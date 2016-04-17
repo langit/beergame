@@ -53,6 +53,8 @@ import socket
 import collections
 from getpass import getpass
 
+PORT = 8888 #this must agree with bg_config.port
+
 enco = 'utf-8'
 
 def ask_int(msg, low=0, default=''):
@@ -98,13 +100,13 @@ def client(ip, port):
     finally:
         #rfile.close()
         sock.close()
+        input("Your session ended. Press <ENTER> to quit.")
 
 
 if __name__ == "__main__":
 
-    HOST = input("Game host [localhost]: ")
+    HOST = input("Beer Game Host: ")
     if not HOST: HOST = 'localhost'
-    PORT = int(ask_int("A four digit port [8888]: ", 1000, 8888))
+    #PORT = int(ask_int("A four digit port [8888]: ", 1000, 8888))
     
     client(HOST, PORT)
-    input("Your session ended. Press <ENTER> to quit.")
