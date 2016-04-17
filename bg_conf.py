@@ -27,9 +27,8 @@ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
 OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 '''
-import random
 
-port = 8888
+port = 8888 # the port on which to serve
 
 password = 'bgadmin' #password for admin
 
@@ -41,8 +40,10 @@ init_inv = 15   # initial inventory
 holding_cost = 1 
 backlog_cost = 2
 
-market_demands = (5,)*5 + tuple(
-    random.randint(8,10) for i in range(40))
+market_demands = (5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9,
+                  9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+                  9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+                  9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9)
 
-roles = ["Retailer", "Distributor", "Bottler", "Brewer", "Depot"]
+roles = ("Retailer", "Distributor", "Bottler", "Brewer", "Depot")
 
