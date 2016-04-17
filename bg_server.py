@@ -3,7 +3,7 @@ It is developed for teaching purpose only.
 
 By Yingjie Lan (ylan@pku.edu.cn), Peking University
 
-Date of latest update: 2016/4/26.
+Date of latest update: 2016/4/27.
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -56,6 +56,7 @@ import collections
 import time
 import random
 
+
 ##class que(list):
 ##    def __init__(self, *args):
 ##        list.__init__(self, *args)
@@ -63,76 +64,69 @@ import random
 
 que = collections.deque
 
+#game configuration
+import bg_conf as conf
 
-class BeerGame:
-    echelons = 2
-    order_delay = 1
-    ship_delay = 2
-    order_size = 5
-    init_inv = 15
-    holding_cost = 1
-    backlog_cost = 2
-    
-    market_demands = (5,)*5 + tuple(
-        random.randint(8,10) for i in range(40))
-    
-    roles = ["Retailer", "Distributor", "Bottler", "Brewer", "Depot"]
-
-    #magic_codes = 
-    @classmethod
-    def intro(self, game_id):
-        players = ' <= '.join(self.roles[:self.echelons]) +' << Depot'
-        bline = '-'*len(players)
-        players = '''
-+--{}--+
-|  {}  |
-+--{}--+'''.format(bline, players, bline)
-        return '''
-  ++  Welcome to the Beer Game BG-{}!  ++
-     
+def summary(game_id=''):
+    players = 'Depot |=> '+' => '.join(
+        reversed(conf.roles[:conf.echelons]) )
+    bline = '-'*len(players)
+    w = ' ' * max(0,(50-len(players))//2)
+    players = '''
+{}+--{}--+
+{}|  {}  |
+{}+--{}--+'''.format(w, bline, w, players, w, bline)
+    return '''
+++  Welcome to the Beer Game {}!  ++
+ 
 In this game, there are {} echelons/players:{}
-The Depot for the whole chain has *abundant* supply.
-The following is true for all players:
+The *external* Depot for the whole chain has *abundant*
+supply. The following is true for all players:
 
-  1. Orders take {} week(s) to reach the supplier.
-  2. Shipment takes {} week(s) to reach the customer.
-  3. Inventory holding cost is {} per box per week,
-  4. and backlogging cost is {} per box per week.
-  5. The game lasts for {} weeks.
+1. Orders take {} week(s) to reach the supplier.
+2. Shipment takes {} week(s) to reach the customer.
+3. Inventory holding cost is {} per box per week,
+4. and backlogging cost is {} per box per week.
+5. The game lasts for {} weeks.
 
 In the beginning, there are {} order(s) of {} boxes on
 the way to the supplier, and {} shipment(s) of {} boxes each
 on the way to the player. The initial inventory is {}.
-'''.format(game_id, self.echelons, players,
-           self.order_delay, self.ship_delay,
-           self.holding_cost, self.backlog_cost,
-           len(self.market_demands),
+'''.format(game_id, conf.echelons, players,
+       conf.order_delay, conf.ship_delay,
+       conf.holding_cost, conf.backlog_cost,
+       len(conf.market_demands),
 
-           self.order_delay, self.order_size, 
-           self.ship_delay, self.order_size,           
-           self.init_inv)
+       conf.order_delay, conf.order_size, 
+       conf.ship_delay, conf.order_size,           
+       conf.init_inv)
 
+def check_admin(passcode):
+    return conf.password == passcode
+
+class BeerGame:
     def __init__(self, games):
         self.make_pipeline()
-        self.slots = [BGPlayer(i, self) for i in range(self.echelons)]
+        self.slots = [BGPlayer(i, self) for i in range(conf.echelons)]
         games.append(self)
         self.game_id = len(games)
 
     def make_pipeline(self):
         #player #i gets order from order_ques[i],
         #and puts order into order_ques[i+1]
-        self.order_ques = [que(self.order_size
-                              for d in range(self.order_delay))
-                           for i in range(self.echelons)]
-        self.order_ques[0] = que(self.market_demands)
+        self.order_ques = [que(conf.order_size
+                              for d in range(conf.order_delay))
+                           for i in range(conf.echelons)]
+        self.order_ques[0] = que(conf.market_demands)
 
         #player #i gets shipment from ship_ques[i+1]
         #and ships out to ship_ques[i]
-        self.ship_ques = [que(self.order_size
-                              for d in range(self.ship_delay))
-                 for i in range(self.echelons)]
+        self.ship_ques = [que(conf.order_size
+                              for d in range(conf.ship_delay))
+                 for i in range(conf.echelons)]
         #the raw material depot
-        loop = que(self.order_size for i in range(self.ship_delay+1))
+        loop = que(conf.order_size
+                   for i in range(conf.ship_delay+conf.order_delay))
         self.order_ques.append(loop)
         self.ship_ques.append(loop)
         
@@ -171,12 +165,15 @@ on the way to the player. The initial inventory is {}.
         q = self.ship_ques[pid+1]
         return self.deque(q, real)
 
+    def __repr__(self):
+        return "BG-{}".format(self.game_id)
+
 class BGPlayer:
     
     def __init__(self, pid, game):
         self.game = game
         self.pid = pid
-        self.inv = game.init_inv
+        self.inv = conf.init_inv
         ordout = game.order_ques[pid+1]
         shipin = game.ship_ques[pid+1]
         self.wait = sum(ordout)
@@ -227,8 +224,8 @@ increased from {} to {} boxes, waiting for {} more boxes.
 '''.format(self.week, shipin, old_inv, inv, wait))
 
         #cost: demand came near the end of a week.
-        cost = (inv * self.game.holding_cost if inv>0
-                      else - inv * self.game.backlog_cost)
+        cost = (inv * conf.holding_cost if inv>0
+                      else - inv * conf.backlog_cost)
 
 
         while True:
@@ -291,9 +288,10 @@ The incurred cost is {} last week, total cost: {}.
         
 
     def __repr__(self):
-        return "BG-{}P{}: The {} in game BG-{}".format(
-            self.game.game_id, self.pid+1,
-            BeerGame.roles[self.pid], self.game.game_id)
+        return "{}P{}".format(self.game, self.pid+1)
+    
+    def get_role(self):
+        return conf.roles[self.pid]
     
     def save(self):
         filename = "BG-{}P{}.csv".format(self.game.game_id, self.pid+1)
@@ -364,7 +362,7 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
         data = str(self.request.recv(8), enco)
         return int(data)
 
-    def assign(self, code): #with glock.
+    def login(self, code): #with glock.
         if code.startswith(':'): #any slot
             code = code[1:]
             for g in self.games:
@@ -385,54 +383,54 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
                         break
         else: #specific slot
             pid = code[:code.index(':')].upper()
+            assert pid.startswith("BG-")
             code = code[len(pid)+1:]
-            gid = int(pid[pid.index('-')+1:pid.index('P')])
+            gid = int(pid[3:pid.index('P')])
             pid = int(pid[pid.index('P')+1: ])
             p = self.games[gid-1].slots[pid - 1]
 
-            if p.thread is None or p.passcode is None\
-               or code == p.passcode:
+            if p.passcode is None or code == p.passcode:
                 self.player = p
                 p.thread = self.thread
                 p.passcode = code
-            elif code.startswith('superviser reset'):
-                p.passcode = None
+            elif code.startswith('reset:'):
+                #reset the players password by admin
+                if check_admin(code[6:]):
+                    p.passcode = None
 
 
     def handle(self):
         self.sendall("""!CODE:
         ++++++++++++++++++++++++++++++
-        +   Your ID:PASSCODE pair:   +
+        +    Your ID and PASSCODE    +
         ++++++++++++++++++++++++++++++
 
 If you don't know your player ID (something like BG-1P2),
-just skip your ID, start with ':', followed by  a passcode
-known only to your team. You will be assigned an available
-role in a game, and the passcode will be needed next time
-you sign in. An example for this is
-                    :pAss123!
-If you know your player ID and passcode, provide them now.
-Your ID:PASSCODE pair: """)
+just skip your ID, you will be assigned an available ID
+in the game, and the passcode your provided will be used
+the next time you sign in.""")
         #code = 'BG-1P2:passcode' or ':passcode'
         code = str(self.request.recv(128), enco)
-        with self.glock: self.assign(code)
+        with self.glock: self.login(code)
         if self.player is None:
             self.sendall("Can't find your player. Disconnecting...")
             return
 
-        self.sendall(BeerGame.intro(self.player.game.game_id))
+        self.sendall(summary(self.player.game))
 
         self.sendall('''
-****************************************************************
-You are {}.
-Please REMEMBER your ID and PASSCODE.
-Your inventory is {}. Weeks already played: {}.
-You are waiting for {} boxes of ordered beer from the supplier.
-****************************************************************
-'''.format(self.player, self.player.inv,
-           self.player.week, self.player.wait))
+********************************************************************
+*  Welcome, you are the {} in the game {}.
+*  Your player ID is {}. Please REMEMBER your ID and PASSCODE.
+*  Weeks already played: {}.
+*  Your inventory is {}.
+*  You are waiting for {} boxes of ordered beer from the supplier.
+********************************************************************
+'''.format(self.player.get_role(), self.player.game,
+           self.player, self.player.week, 
+           self.player.inv, self.player.wait))
         
-        while self.player.week < len(BeerGame.market_demands):
+        while self.player.week < len(conf.market_demands):
             for msg in self.player.act(self.ask_order):
                 self.sendall(msg)
                 if self.player.thread is not self.thread:
@@ -487,17 +485,16 @@ def ask_int(msg, low=0, default=''):
 
 
 if __name__ == "__main__":
-    HOST = input("Game host [localhost]: ")
-    if not HOST: HOST = 'localhost'
-    PORT = int(ask_int("A four digit port [8888]: ", 1000, 8888))
-    
-    print(BeerGame.intro('config'))
-    server = ThreadedTCPServer((HOST, PORT), ThreadedTCPRequestHandler)
+    print(summary())
+    server = ThreadedTCPServer((conf.host, conf.port),
+                               ThreadedTCPRequestHandler)
 
     host, port = server.server_address
-    print("starting up server at " + ':'.join([str(host), str(port)]))
+    print("Starting up server at {}:{}".format(host, port))
     
     server.serve_forever()
 
     #server.shutdown()
     #server.server_close()
+    
+    input("Server is down. Press <ENTER> to quit.")
