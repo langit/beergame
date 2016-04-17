@@ -3,7 +3,7 @@ It is developed for teaching purpose only.
 
 By Yingjie Lan (ylan@pku.edu.cn), Peking University
 
-Date of latest update: 2016/4/26.
+Date of latest update: 2016/4/27.
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -51,6 +51,7 @@ the server enters a loop:
 
 import socket
 import collections
+from getpass import getpass
 
 enco = 'utf-8'
 
@@ -86,9 +87,10 @@ def client(ip, port):
             if msg.startswith('!ASK:'):
                 sock.sendall(bytes(ask_int(msg[5:]), enco))
             elif msg.startswith('!CODE:'):
-                code = input(msg[6:])
-                if not code: code = '   '
-                sock.sendall(bytes(code, enco))
+                print(msg[6:])
+                user = input("Player ID (press <return> if you don't have it): ")
+                word = getpass("Your password (must provide one): ")
+                sock.sendall(bytes(user+":"+word, enco))
             else:
                 print(msg)
                 input("Press <ENTER> to continue...")
@@ -105,3 +107,4 @@ if __name__ == "__main__":
     PORT = int(ask_int("A four digit port [8888]: ", 1000, 8888))
     
     client(HOST, PORT)
+    input("Your session ended. Press <ENTER> to quit.")
