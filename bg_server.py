@@ -166,7 +166,51 @@ class BeerGame:
         return self.deque(q, real)
 
     def __repr__(self):
-        return "BG-{}".format(self.game_id)
+        return "BG{}".format(self.game_id)
+
+    def game_summary(self, f):
+        f.write("Summary Report for Game {}\n".format(self))
+        f.write("Players")
+        for p in self.slots: f.write(",{}".format(p.get_role()))
+        f.write("\n")
+
+        f.write("Weeks")
+        for p in self.slots: f.write(",{}".format(p.week))
+        f.write("\n")
+
+        f.write("Costs")
+        for p in self.slots: f.write(",{}".format(p.cost))
+        f.write("\n")
+
+        f.write("Straight Orders")
+        for p in self.slots: f.write(",{}".format(p.fulfilled_orders))
+        f.write("\n")
+
+        f.write("Total Orders")
+        for p in self.slots: f.write(",{}".format(p.fulfilled_orders
+                                            +p.unfulfilled_orders))
+        f.write("\n")
+
+        f.write("Straight Boxes")
+        for p in self.slots: f.write(",{}".format(p.fulfilled_boxes))
+        f.write("\n")
+
+        f.write("Total Boxes")
+        for p in self.slots: f.write(",{}".format(p.fulfilled_boxes
+                                            +p.unfulfilled_boxes))
+        f.write("\n")
+
+    def game_detail(self, f):
+        f.write("Detail Report for Game {}\n".format(self))
+        for p in self.slots: p.write(f)
+
+    def finished(self):
+        if not all(p.done for p in self.slots): return
+        with open("id{}.csv".format(self), 'wt') as f:
+            self.game_summary(f)
+            self.game_detail(f)
+        print("Game {} finished successfully!".format(self))
+
 
 class BGPlayer:
     
@@ -183,8 +227,10 @@ class BGPlayer:
         self.week = 0
         self.thread = None
         self.passcode = None
+        self.done = False
 
         #history and performance
+        self.shipin_history = [] #ship-ins
         self.order_history = [] #placed orders
         self.inventory_history = []
         self.demand_history = []
@@ -267,7 +313,8 @@ The incurred cost is {} last week, total cost: {}.
         self.wait, self.inv = wait, inv
         self.cost += cost
         self.week += 1 #increament
-        
+
+        self.shipin_history.append(shipin)
         self.order_history.append(order)
         self.demand_history.append(demand)
         self.fulfill_history.append(fulfil)
@@ -293,27 +340,30 @@ The incurred cost is {} last week, total cost: {}.
     def get_role(self):
         return conf.roles[self.pid]
     
-    def save(self):
-        filename = "BG-{}P{}.csv".format(self.game.game_id, self.pid+1)
-        f=open(filename, 'wt')
-        f.write("Game Report for {}\n".format(repr(self)))
-        f.write('Total cost, {}\n'.format(self.cost))
-        f.write('Fulfilled boxes, {}, Unfulfilled boxes, {}\n'.format(
-            self.fulfilled_boxes, self.unfulfilled_boxes))
-        f.write('Fulfilled orders, {}, Unfulfilled orders, {}\n'.format(
-            self.fulfilled_orders, self.unfulfilled_orders))
+    def write(self, f):
+        f.write("Game Report for {}: the {}\n".
+                format(self, self.get_role()))
+        f.write('Total cost, {}, Weeks, {}\n'.
+                format(self.cost, self.week))
+        f.write('Fulfilled boxes, {}, Unfulfilled boxes, {}\n'.
+            format(self.fulfilled_boxes, self.unfulfilled_boxes))
+        f.write('Fulfilled orders, {}, Unfulfilled orders, {}\n'.
+            format(self.fulfilled_orders, self.unfulfilled_orders))
         
-        f.write('Total backlogs, {}, Total on-hands, {}\n'.format(
-            self.backlogs, self.onhands))
-        f.write('Week, Placed Order, Demand, Fulfill, Inventory\n')
+        f.write('Total backlogs, {}, Total on-hands, {}\n'.
+            format(self.backlogs, self.onhands))
+        f.write('Week, Ship-In, Placed Order, Demand, Fulfill, Inventory\n')
 
-        for w, (p, d, u, i) in enumerate(
-            zip(self.order_history, self.demand_history,
-                self.fulfill_history, self.inventory_history)):
-            f.write('{},{},{},{},{}\n'.format(w+1,p,d,u,i))
-        f.close()
-        print("File saved:", filename)
+        for w, (s, p, d, u, i) in enumerate(
+            zip(self.shipin_history, self.order_history,
+                self.demand_history, self.fulfill_history,
+                self.inventory_history)):
+            f.write('{}, {},{},{},{},{}\n'.format(w+1,s,p,d,u,i))        
 
+    def finished(self):
+        if self.done: return
+        self.done = True
+        self.game.finished()
 
 enco = 'utf-8' #'ascii'
 
@@ -363,7 +413,21 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
         return int(data)
 
     def login(self, code): #with glock.
-        if code.startswith(':'): #any slot
+        if code.startswith('admin:'): #admin task
+            code = code[6:]
+            if code.startswith('save:'):
+                #save all games!
+                if check_admin(code[5:]):
+                    filename = "AllGames{}.csv".format(time.time())
+                    with open(filename, 'wt') as f:
+                        for g in self.games:
+                            g.game_summary(f)
+                        for g in self.games:
+                            g.game_detail(f)
+                    print("All games saved to file {}!".
+                          format(finename))
+                    
+        elif code.startswith(':'): #any slot
             code = code[1:]
             for g in self.games:
                 for p in g.slots:
@@ -381,11 +445,12 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
                         self.player = p
                         p.thread = self.thread
                         break
+                    
         else: #specific slot
             pid = code[:code.index(':')].upper()
-            assert pid.startswith("BG-")
+            assert pid.startswith("BG")
             code = code[len(pid)+1:]
-            gid = int(pid[3:pid.index('P')])
+            gid = int(pid[len("BG"):pid.index('P')])
             pid = int(pid[pid.index('P')+1: ])
             p = self.games[gid-1].slots[pid - 1]
 
@@ -397,6 +462,7 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
                 #reset the players password by admin
                 if check_admin(code[6:]):
                     p.passcode = None
+                    print("Passcode for {} is reset.".format(p))
 
 
     def handle(self):
@@ -405,16 +471,17 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
         +    Your ID and PASSCODE    +
         ++++++++++++++++++++++++++++++
 
-If you don't know your player ID (something like BG-1P2),
+If you don't know your player ID (something like BG1P2),
 just skip your ID, you will be assigned an available ID
 in the game, and the passcode your provided will be used
 the next time you sign in.""")
-        #code = 'BG-1P2:passcode' or ':passcode'
+        #code = 'BG1P2:passcode' or ':passcode'
         code = str(self.request.recv(128), enco)
         with self.glock: self.login(code)
         if self.player is None:
             self.sendall("Can't find your player. Disconnecting...")
             return
+        print("Player {} has logged in.".format(self.player))
 
         self.sendall(summary(self.player.game))
 
@@ -436,14 +503,15 @@ the next time you sign in.""")
                 if self.player.thread is not self.thread:
                     return #lost the player
             #self.player.save() #for testing only
-
-        self.player.save()
+            
+        self.player.finished()
+        self.sendall("Congratulations! You have finished the entire game!")
 
 class ThreadedTCPServer(socketserver.TCPServer):
     
     def process_request(self, request, client_address):
         """Start a new thread to process the request."""
-        print("Spawning by:", threading.current_thread().name)
+        #print("Spawning by:", threading.current_thread().name)
         t = threading.Thread(target = self.process_request_thread,
                              args = (request, client_address))
                                                  
@@ -486,11 +554,13 @@ def ask_int(msg, low=0, default=''):
 
 if __name__ == "__main__":
     print(summary())
-    server = ThreadedTCPServer((conf.host, conf.port),
+    server = ThreadedTCPServer(('', conf.port),
                                ThreadedTCPRequestHandler)
 
-    host, port = server.server_address
-    print("Starting up server at {}:{}".format(host, port))
+    name = socket.gethostname()
+    host = socket.gethostbyname(name)
+    print("Players may try this name or IP to login.")
+    print("Host name: {} (IP = {})".format(name, host))
     
     server.serve_forever()
 
