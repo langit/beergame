@@ -29,7 +29,6 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 '''
 import random
 
-host = 'localhost'
 port = 8888
 
 password = 'bgadmin' #password for admin
