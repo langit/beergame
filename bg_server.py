@@ -211,6 +211,14 @@ class BeerGame:
             self.game_detail(f)
         print("Game {} finished successfully!".format(self))
 
+    def status(self):
+        return '''
+Status of Game {}:
+{}
+'''.format(self,
+    '\n'.join('   {}: Weeks {}, Active {}'.
+        format(p.get_role(), p.week, p.thread is not None)
+              for p in self.slots))
 
 class BGPlayer:
     
@@ -381,8 +389,108 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
         #self.wfile = self.request.makefile('wb', 0)
 
         self.thread = threading.current_thread()
-        self.player = None
         
+        self.player = None
+
+        self.sendall("""!CODE:
+        ++++++++++++++++++++++++++++++
+        +    Your ID and PASSCODE    +
+        ++++++++++++++++++++++++++++++
+
+If you don't know your player ID (something like BG1P2),
+just skip your ID, you will be assigned an available ID
+in the game, and the passcode your provided will be used
+the next time you sign in.""")
+        #code = 'BG1P2:passcode' or ':passcode'
+        code = str(self.request.recv(128), enco)
+        with self.glock:
+            user = self.login(code)
+
+        if user == 'admin':
+            self.fhand = self.handle_admin
+        elif type(user) is BGPlayer:
+            self.player = user
+            user.thread = self.thread
+            self.fhand = self.handle_player
+        else:
+            self.fhand = None
+            self.sendall("Can't find your player. Disconnecting...")
+
+    def handle(self):
+        if self.fhand: self.fhand()
+
+    def handle_admin(self):
+        while True:
+            self.sendall("!CMD:>>> ")
+            cmd = str(self.request.recv(128), enco)
+            ' '.join(cmd.split())
+            
+            if cmd in ('exit', 'quit', 'bye'): break
+
+            if cmd == 'save all':
+                filename = "AllGames{}.csv".format(time.time())
+                with open(filename, 'wt') as f:
+                    for g in self.games:
+                        g.game_summary(f)
+                    for g in self.games:
+                        g.game_detail(f)
+                self.sendall("All games saved to file {}!".
+                  format(filename))
+                continue
+            if cmd.startswith('save '):
+                try:
+                    gid = int(cmd[5:])
+                except:
+                    gid = 0
+                if 0 < gid <= len(self.games):
+                    game = self.games[gid-1]
+                    filename = "id{}-{}.csv".format(game, time.time()) 
+                    with open(filename, 'wt') as f:
+                        game.game_summary(f)
+                        game.game_detail(f)
+                    self.sendall("Game {} saved to {}!".
+                                 format(game, filename))
+                else:
+                    self.sendall("""Save failed: invalid game number.
+Currently there are {} games.""".format(len(self.games)))        
+                continue
+            
+            if cmd.startswith('status '):
+                what = cmd[7:].strip()
+                try:
+                    gid = int(what)
+                except:
+                    gid = 0
+                if 0 < gid <= len(self.games):
+                    game = self.games[gid-1]
+                    self.sendall(game.status())
+                else:
+                    self.sendall("""Status failed: invalid game number.
+Currently there are {} games.""".format(len(self.games)))  
+                continue
+            
+            if cmd.startswith('reset '):
+                #reset the players password by admin
+                gid, pid = self.locate(cmd[6:].upper().strip())
+                p = self.games[gid].slots[pid]
+                p.passcode = None
+                self.sendall("Passcode for {} is reset.".format(p))
+                continue
+
+            #sending help anyway:
+            self.sendall('''
+Admin can issue the following commands:
+
+reset [player ID]: reset the password of a player.
+save all: save all games.
+save #: save game #, where # is a number.
+status #: print the status of one game.
+help: print this help message.
+exit: end the admin session.
+quit: end the admin session.
+bye:  end the admin session.
+''')
+
     def finish(self):
         if self.player != None:
             print('Player {} is released.'.format(self.player))
@@ -399,7 +507,7 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
         #else: print("MSG SENT!")
         #self.request.recv(8)
         if any(msg.startswith(h) for h in
-               ('!ASK:', '!CODE:')):
+               ('!ASK:', '!CODE:', '!CMD:')):
             return
         #msg = str(self.rfile.readline().strip(), enco)
         msg = str(self.request.recv(128), enco)
@@ -412,77 +520,40 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
         data = str(self.request.recv(8), enco)
         return int(data)
 
+    def locate(self, pid):
+        assert pid.startswith("BG")
+        gid = int(pid[len("BG"):pid.index('P')])
+        pid = int(pid[pid.index('P')+1: ])
+        return gid-1, pid-1
+
     def login(self, code): #with glock.
-        if code.startswith('admin:'): #admin task
-            code = code[6:]
-            if code.startswith('save:'):
-                #save all games!
-                if check_admin(code[5:]):
-                    filename = "AllGames{}.csv".format(time.time())
-                    with open(filename, 'wt') as f:
-                        for g in self.games:
-                            g.game_summary(f)
-                        for g in self.games:
-                            g.game_detail(f)
-                    print("All games saved to file {}!".
-                          format(finename))
-                    
-        elif code.startswith(':'): #any slot
+        if code.startswith('admin:'):
+            return 'admin' if check_admin(code[6:]) else None
+        if code.startswith(':'): #any slot
             code = code[1:]
             for g in self.games:
                 for p in g.slots:
                     if p.passcode is None:
                         p.passcode = code
-                        self.player = p
-                        p.thread = self.thread
-                        break
-                if self.player: break
-            while self.player is None:
+                        return p
+            while True:
                 g = BeerGame(self.games)
                 for p in g.slots:
                     if p.passcode is None:
                         p.passcode = code
-                        self.player = p
-                        p.thread = self.thread
-                        break
-                    
+                        return p                    
         else: #specific slot
             pid = code[:code.index(':')].upper()
-            assert pid.startswith("BG")
             code = code[len(pid)+1:]
-            gid = int(pid[len("BG"):pid.index('P')])
-            pid = int(pid[pid.index('P')+1: ])
-            p = self.games[gid-1].slots[pid - 1]
+            gid, pid = self.locate(pid)
+            p = self.games[gid].slots[pid]
 
             if p.passcode is None or code == p.passcode:
-                self.player = p
-                p.thread = self.thread
                 p.passcode = code
-            elif code.startswith('reset:'):
-                #reset the players password by admin
-                if check_admin(code[6:]):
-                    p.passcode = None
-                    print("Passcode for {} is reset.".format(p))
+                return p
 
-
-    def handle(self):
-        self.sendall("""!CODE:
-        ++++++++++++++++++++++++++++++
-        +    Your ID and PASSCODE    +
-        ++++++++++++++++++++++++++++++
-
-If you don't know your player ID (something like BG1P2),
-just skip your ID, you will be assigned an available ID
-in the game, and the passcode your provided will be used
-the next time you sign in.""")
-        #code = 'BG1P2:passcode' or ':passcode'
-        code = str(self.request.recv(128), enco)
-        with self.glock: self.login(code)
-        if self.player is None:
-            self.sendall("Can't find your player. Disconnecting...")
-            return
-        print("Player {} has logged in.".format(self.player))
-
+        
+    def handle_player(self):
         self.sendall(summary(self.player.game))
 
         self.sendall('''
