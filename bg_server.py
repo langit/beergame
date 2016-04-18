@@ -47,11 +47,18 @@ the server enters a loop:
 '''
 
 
-#for Python 3.5
+import sys
+version = sys.version_info
+if version.major < 3: 
+    input = raw_input
+    def bytes(x,y): return x
+    str_sys = str
+    def str(x,y=None): return str_sys(x)
+    import SocketServer as socketserver
+else: import socketserver
 
 import socket
 import threading
-import socketserver
 import collections
 import time
 import random
@@ -104,7 +111,7 @@ on the way to the player. The initial inventory is {}.
 def check_admin(passcode):
     return conf.password == passcode
 
-class BeerGame:
+class BeerGame(object):
     def __init__(self, games):
         self.make_pipeline()
         self.slots = [BGPlayer(i, self) for i in range(conf.echelons)]
@@ -220,7 +227,7 @@ Status of Game {}:
         format(p.get_role(), p.week, p.thread is not None)
               for p in self.slots))
 
-class BGPlayer:
+class BGPlayer(object):
     
     def __init__(self, pid, game):
         self.game = game
@@ -389,8 +396,9 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
         #self.wfile = self.request.makefile('wb', 0)
 
         self.thread = threading.current_thread()
-        
         self.player = None
+
+    def handle(self):
 
         self.sendall("""!CODE:
         ++++++++++++++++++++++++++++++
@@ -403,27 +411,32 @@ in the game, and the passcode your provided will be used
 the next time you sign in.""")
         #code = 'BG1P2:passcode' or ':passcode'
         code = str(self.request.recv(128), enco)
-        with self.glock:
-            user = self.login(code)
+        with self.glock: self.player = self.login(code)
 
-        if user == 'admin':
-            self.fhand = self.handle_admin
-        elif type(user) is BGPlayer:
-            self.player = user
-            user.thread = self.thread
-            self.fhand = self.handle_player
+        if self.player == 'admin':
+            self.player = None 
+            self.handle_admin()
+        elif type(self.player) is BGPlayer:
+            self.player.thread = self.thread
+            self.handle_player()
         else:
-            self.fhand = None
-            self.sendall("Can't find your player. Disconnecting...")
-
-    def handle(self):
-        if self.fhand: self.fhand()
+            self.sendall("!END:Can't find your player...bye. ")
 
     def handle_admin(self):
+        helpmsg = '''
+Admin can issue the following commands:
+  reset ID: reset the password of a player.
+  save all: save all games.
+  save #: save game #, where # is a number.
+  status #: print the status of game #.
+  help: print this help message.
+  exit/quit/bye: end the admin session.
+'''
+        self.sendall(helpmsg)
         while True:
             self.sendall("!CMD:>>> ")
             cmd = str(self.request.recv(128), enco)
-            ' '.join(cmd.split())
+            cmd = ' '.join(cmd.split())
             
             if cmd in ('exit', 'quit', 'bye'): break
 
@@ -477,19 +490,9 @@ Currently there are {} games.""".format(len(self.games)))
                 self.sendall("Passcode for {} is reset.".format(p))
                 continue
 
-            #sending help anyway:
-            self.sendall('''
-Admin can issue the following commands:
-
-reset [player ID]: reset the password of a player.
-save all: save all games.
-save #: save game #, where # is a number.
-status #: print the status of one game.
-help: print this help message.
-exit: end the admin session.
-quit: end the admin session.
-bye:  end the admin session.
-''')
+            # if reached here, send help anyway:
+            self.sendall(helpmsg)
+        self.sendall("!END:Session terminated successfully.")
 
     def finish(self):
         if self.player != None:
@@ -507,8 +510,7 @@ bye:  end the admin session.
         #else: print("MSG SENT!")
         #self.request.recv(8)
         if any(msg.startswith(h) for h in
-               ('!ASK:', '!CODE:', '!CMD:')):
-            return
+            ('!ASK:', '!CODE:', '!CMD:', '!END:')): return
         #msg = str(self.rfile.readline().strip(), enco)
         msg = str(self.request.recv(128), enco)
         assert msg.startswith(':confirmed!')
@@ -541,7 +543,7 @@ bye:  end the admin session.
                 for p in g.slots:
                     if p.passcode is None:
                         p.passcode = code
-                        return p                    
+                        return p
         else: #specific slot
             pid = code[:code.index(':')].upper()
             code = code[len(pid)+1:]
@@ -576,13 +578,13 @@ bye:  end the admin session.
             #self.player.save() #for testing only
             
         self.player.finished()
-        self.sendall("Congratulations! You have finished the entire game!")
+        self.sendall("!END:Congratulation! You have finished the game!")
 
 class ThreadedTCPServer(socketserver.TCPServer):
     
     def process_request(self, request, client_address):
         """Start a new thread to process the request."""
-        #print("Spawning by:", threading.current_thread().name)
+        print("Received a new request from {}".format(client_address))
         t = threading.Thread(target = self.process_request_thread,
                              args = (request, client_address))
                                                  

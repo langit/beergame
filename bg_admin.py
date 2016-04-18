@@ -47,13 +47,18 @@ the server enters a loop:
 '''
 
 
-#for Python 3.5
-
+import sys
+version = sys.version_info
+if version.major < 3: 
+    input = raw_input
+    def bytes(x,y): return x
+    str_sys = str
+    def str(x,y=None): return str_sys(x)
 import socket
 import collections
 from getpass import getpass
 
-PORT = 8888 #this must agree with bg_config.port
+port = 8888 #this must agree with bg_config.port
 
 enco = 'utf-8'
 
@@ -96,6 +101,9 @@ def client(ip, port):
                 user = 'admin'
                 word = getpass("Admin password: ")
                 sock.sendall(bytes(user+":"+word, enco))
+            elif msg.startswith('!END:'):
+                print(msg[5:]) #end of session
+                break
             else:
                 print(msg)
                 input("Press <ENTER> to continue...")
@@ -108,8 +116,8 @@ def client(ip, port):
 
 if __name__ == "__main__":
 
-    HOST = input("Beer Game Host: ")
-    if not HOST: HOST = 'localhost'
-    #PORT = int(ask_int("A four digit port [8888]: ", 1000, 8888))
+    host = input("Beer Game Host: ")
+    if not host: host = 'localhost'
+    #port = int(ask_int("A four digit port [8888]: ", 1000, 8888))
     
-    client(HOST, PORT)
+    client(host, port)
